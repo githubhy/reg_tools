@@ -1,0 +1,46 @@
+# This is a basic workflow that is manually triggered
+
+name: CI_release
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+    
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+    # This workflow contains a single job called "build"
+    build:
+      name: Build with pyinstaller@windows using wine@ubuntu
+      # The type of runner that the job will run on
+      runs-on: ubuntu-latest
+      # Need wirte permission to release
+      permissions: write-all
+  
+      # Steps represent a sequence of tasks that will be executed as part of the job
+      steps:
+        # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+        - uses: actions/checkout@v3
+  
+        # Cross-build the project using the container
+        - name: Cross-compile using the container
+          uses: addnab/docker-run-action@v3
+          with:
+            image: batonogov/pyinstaller-windows:3.1.6
+            options: -v ${{ github.workspace }}:/src
+            run: |
+              /entrypoint.sh 2>&1 | tee build_$GITHUB_REF_NAME.log
+        - name: Tar files
+          run: tar -czvf RegTools_$GITHUB_REF_NAME.tar.gz -C dist .
+        - uses: ncipollo/release-action@v1
+          with:
+            artifacts: "RegTools_${{ github.ref_name }}.tar.gz,build_${{ github.ref_name }}.log"
+    #           bodyFile: "body.md"
+            token: ${{ secrets.GITHUB_TOKEN }}

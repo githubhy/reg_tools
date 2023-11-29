@@ -1,4 +1,6 @@
 import click
+import logging
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 @click.group()
 def cli():
@@ -20,52 +22,99 @@ def dac2logic(index, dac_code_hex):
 
 
 @cli.command()
-@click.option('--bits', default='0:0,1:1', help='bits range')
-@click.argument('reg_val')
-def regfield(bits, reg_val):
+@click.option('--field', default='', 
+              help='Display the value of field(s), as well as the new register value including the new value for the field(s). '
+                    'e.g, 7:9=0x7,15:12,2:2,1 will set [9:7] to 0x7, and display it as well as [15:12], [2], [1]')
+@click.argument('value')
+def regfields(field, value):
     from rich.console import Console
     from rich.table import Table
     from rich import box
     from dataclasses import dataclass
     import pprint
+    from bitarray import bitarray
+    from bitarray.util import int2ba
 
     pp = pprint.PrettyPrinter(indent=4)
 
-    a = int(reg_val, 0) # auto conversion
+    a = int(value, 0) # auto conversion
 
     @dataclass
     class Field():
         limits: list
         style: str
         value: int
+        new_value: int
 
     try:
-        bounds = [[int(i, 0) for i in bs.split(':')] for bs in bits.split(',')]
-        colors = [251, 153, 226, 190, 183, 51] + [15] * (32-6)
-        # pp.pprint(colors)
-        styles = [f'black on color({colors[i]})' for i in range(len(bounds))]
-        values = [(a >> b[1]) & ((0x1 << (b[0]-b[1]+1)) - 1) for b in bounds]
+        fs = []
+        has_new = False
+        logging.debug(field)
+        if field:
+            ls = list(filter(None, field.split(',')))
+            logging.debug(ls)
+            lss = [l.split('=') for l in ls]
+            logging.debug(lss)
+            bs = [sorted([int(i, 0) for i in bs[0].split(':')], reverse=True) for bs in lss]
+            bounds = [b if len(b) > 1 else b*2 for b in bs]
+            logging.debug(bounds)
+            new_values = [int(bs[1], 0) if len(bs) > 1 else None for bs in lss]
+            logging.debug(new_values)
+            has_new = True if list(filter(None, new_values)) else False
+            cs = [251, 153, 226, 190, 183, 51]
+            colors = cs + [15] * (32-len(cs))
+            styles = [f'black on color({colors[i]})' for i in range(len(bounds))]
+            logging.debug(styles)
+            values = [(a >> b[1]) & ((0x1 << (b[0]-b[1]+1)) - 1) for b in bounds]
 
-        fields = []
-        for i in range(len(bounds)):
-            fields.append(Field(limits=bounds[i], style=styles[i], value=values[i]))
-            click.echo(f'VAL[{bounds[i][0]}:{bounds[i][1]}] = 0x{values[i]:X}')
+            for i in range(len(bounds)):
+                fs.append(Field(limits=bounds[i], style=styles[i], value=values[i], new_value=new_values[i]))
+            
+            fs = sorted(fs, key=lambda x: x.limits[0], reverse=True)
+
+            if has_new:
+                b = a
+                for f in fs:
+                    if f.new_value != None:
+                        mask = (0x1 << (f.limits[0] - f.limits[1] + 1)) - 1
+                        logging.debug(mask)
+                        b = (b & ~(mask << f.limits[1])) | ((f.new_value & mask) << f.limits[1])
+
+            for f in fs:
+                click.echo(f'[{f.limits[0]}:{f.limits[1]}] = 0x{f.value:X}{f" --> 0x{f.new_value:X}" if f.new_value else ""}')
+
     except Exception as e:
         click.echo(f'REG_FIELD ERROR: {e}')
     
-    table = Table(title=f'0x{a:09_X}', box=box.HORIZONTALS, pad_edge=False)
 
-    r = reversed(range(32))
-    l = []
-    fields
-    for i in r:
-        style = ''
-        for f in fields:
-            if i <= f.limits[0] and i >= f.limits[1]:
-                style = f.style
-        table.add_column(f'{i}', justify="right", style=style, no_wrap=True)
-        l.append(str((a >> i) & 0x1))
-    table.add_row(*l)
+    indices = list(reversed(range(32)))
+    logging.debug(indices)
+    sty = lambda i, fs: list(filter(None, [f.style if f.limits[0] >= i >= f.limits[1] else None for f in fs]))
+    styles = [sty(i, fs)[0] if sty(i, fs) else '' for i in indices]
+    styles.reverse()
+    logging.debug(styles)
+    
+    ## For the table
+    table_title = f'Value: 0x{a:09_X}'
+    if has_new:
+        table_title = 'Original ' + table_title + f', New Value: 0x{b:09_X}'
+
+    table = Table(title=table_title, title_style='bold white on black', box=box.HORIZONTALS)
+    for i in indices:
+        table.add_column(f'{i}', justify="right", style=styles[i], no_wrap=True)
+    table.add_row(*int2ba(a, length=32).to01())
+    logging.debug(int2ba(a, length=32).to01())
+
+    if has_new:
+        bits = list(int2ba(b, length=32).to01())
+        bits.reverse()
+        for i in indices:
+            for f in fs:
+                if (f.new_value != None) and (f.limits[0] >= i >= f.limits[1]):
+                    bits[i] = '[bold white on black]' + bits[i]
+        bits.reverse()
+        table.add_row(*bits)
+
     console = Console()
     console.print(table)
 

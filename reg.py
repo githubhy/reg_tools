@@ -22,7 +22,7 @@ def dac2logic(index, dac_code_hex):
 
 
 @cli.command()
-@click.option('--field', default='', 
+@click.option('--field', default='',
               help='Display the value of field(s), as well as the new register value including the new value for the field(s). '
                     'e.g, 7:9=0x7,15:12,2:2,1 will set [9:7] to 0x7, and display it as well as [15:12], [2], [1]')
 @click.argument('value')
@@ -69,7 +69,7 @@ def regfields(field, value):
 
             for i in range(len(bounds)):
                 fs.append(Field(limits=bounds[i], style=styles[i], value=values[i], new_value=new_values[i]))
-            
+
             fs = sorted(fs, key=lambda x: x.limits[0], reverse=True)
 
             if has_new:
@@ -85,7 +85,7 @@ def regfields(field, value):
 
     except Exception as e:
         click.echo(f'REG_FIELD ERROR: {e}')
-    
+
 
     indices = list(reversed(range(32)))
     logging.debug(indices)
@@ -93,7 +93,7 @@ def regfields(field, value):
     styles = [sty(i, fs)[0] if sty(i, fs) else '' for i in indices]
     styles.reverse()
     logging.debug(styles)
-    
+
     ## For the table
     table_title = f'Value: 0x{a:09_X}'
     if has_new:
@@ -112,6 +112,8 @@ def regfields(field, value):
             for f in fs:
                 if (f.new_value != None) and (f.limits[0] >= i >= f.limits[1]):
                     bits[i] = '[bold white on black]' + bits[i]
+        bits = [b if b.startswith('[') else '[dim]' + b for b in bits]
+        logging.debug(bits)
         bits.reverse()
         table.add_row(*bits)
 

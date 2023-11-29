@@ -80,9 +80,6 @@ def regfields(field, value):
                         logging.debug(mask)
                         b = (b & ~(mask << f.limits[1])) | ((f.new_value & mask) << f.limits[1])
 
-            for f in fs:
-                click.echo(f'[{f.limits[0]}:{f.limits[1]}] = 0x{f.value:X}{f" --> 0x{f.new_value:X}" if f.new_value else ""}')
-
     except Exception as e:
         click.echo(f'REG_FIELD ERROR: {e}')
 
@@ -118,7 +115,11 @@ def regfields(field, value):
         table.add_row(*bits)
 
     console = Console()
+    console.print('')
     console.print(table)
+
+    for f in fs:
+        console.print(f'[{f.limits[0]}:{f.limits[1]}] = 0x{f.value:X}{f" --> 0x{f.new_value:X}" if f.new_value else ""}')
 
 
 if __name__ == '__main__':

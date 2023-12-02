@@ -176,7 +176,8 @@ def regfields(value, field, squeeze, save):
         from pathlib import Path
         save_path = Path('reg_fileds_save')
         save_path.mkdir(parents=True, exist_ok=True)
-        console.save_svg(sanitize_filepath(save_path / "Value_{}--Fields_{}.svg".format(value, field), replacement_text='_'))
+        console.save_svg(sanitize_filepath(save_path / "Value_{}--Fields_{}.svg".format(value, field), replacement_text='_'),
+                         title='Register Tools')
 
 if __name__ == '__main__':
     cli()

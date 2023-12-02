@@ -8,4 +8,4 @@ The libraries should be installed to make it work: `pip3 install -r requirements
 # Usage
 `python3 reg.py --help`
 
-An example can be: `python3 reg.py r 0x786789 -f '30,[27:18]=0x87,7:8=0x3' -f 3:2=3 -f 0 -s`
+An example can be: `python3 reg.py r 0x786789 -f "30,[27:18]=0x87,7:8=0x3" -f 3:2=3 -f 0 -s`

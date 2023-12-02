@@ -2,8 +2,32 @@ import click
 import logging
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
-@click.group()
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
+class AliasedGroup(click.Group):
+    def get_command(self, ctx, cmd_name):
+        rv = click.Group.get_command(self, ctx, cmd_name)
+        if rv is not None:
+            return rv
+        matches = [x for x in self.list_commands(ctx)
+                   if x.startswith(cmd_name)]
+        if not matches:
+            return None
+        elif len(matches) == 1:
+            return click.Group.get_command(self, ctx, matches[0])
+        ctx.fail(f"Too many matches: {', '.join(sorted(matches))}")
+
+    def resolve_command(self, ctx, args):
+        # always return the full command name
+        _, cmd, args = super().resolve_command(ctx, args)
+        return cmd.name, cmd, args
+
+@click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 def cli():
+    '''Tools for dealing with registers when doing embeded software development.
+    
+    Commands can be shortened to the first few characters.
+    '''
     pass
 
 
@@ -22,18 +46,29 @@ def dac2logic(index, dac_code_hex):
 
 
 @cli.command()
-@click.option('--field', default='',
-              help='Display the value of field(s), as well as the new register value including the new value for the field(s). '
-                    'e.g, 7:9=0x7,15:12,2:2,1 will set [9:7] to 0x7, and display it as well as [15:12], [2], [1]')
+@click.option('--field', '-f', default=[], multiple=True,
+              help='Display the value of field(s), as well as the new register value including the new value for the field(s).'
+                    ' E.g, "7:9=0x7,[15:12],2:2,[1]" sets [9:7] to 0x7, and display [15:12], [2], [1] at the same time')
+@click.option('--narrow', '-n', 'squeeze', flag_value='narrow',
+              help='Squeeze the table horizontally.')
+@click.option('--narrower', '-nn', 'squeeze', flag_value='narrower',
+              help='Squeeze the table more to fit a tight screen.')
+@click.option('--save', '-s', is_flag=True,
+              help=f'Save the result as SVG pictures in a folder. Open it with a web browser like Chrome or Firefox.')
 @click.argument('value')
-def regfields(field, value):
-    from rich.console import Console
+def regfields(value, field, squeeze, save):
+    '''Get the fields in a value and set the fields given the corresponding values.
+    
+        Any valid number format such as decimal and hexical is supported.
+    '''
+    from rich.console import Console, Group
+    from rich.panel import Panel
     from rich.table import Table
     from rich import box
     from dataclasses import dataclass
     import pprint
-    from bitarray import bitarray
     from bitarray.util import int2ba
+    import re
 
     pp = pprint.PrettyPrinter(indent=4)
 
@@ -51,9 +86,9 @@ def regfields(field, value):
         has_new = False
         logging.debug(field)
         if field:
-            ls = list(filter(None, field.split(',')))
+            ls = list(filter(None, ','.join(field).split(',')))
             logging.debug(ls)
-            lss = [l.split('=') for l in ls]
+            lss = [re.sub("[\[\]]", "", l).split('=') for l in ls]
             logging.debug(lss)
             bs = [sorted([int(i, 0) for i in bs[0].split(':')], reverse=True) for bs in lss]
             bounds = [b if len(b) > 1 else b*2 for b in bs]
@@ -63,7 +98,7 @@ def regfields(field, value):
             has_new = True if list(filter(None, new_values)) else False
             cs = [251, 153, 226, 190, 183, 51]
             colors = cs + [15] * (32-len(cs))
-            styles = [f'black on color({colors[i]})' for i in range(len(bounds))]
+            styles = [f'bold color({colors[i]})' for i in range(len(bounds))]
             logging.debug(styles)
             values = [(a >> b[1]) & ((0x1 << (b[0]-b[1]+1)) - 1) for b in bounds]
 
@@ -87,16 +122,19 @@ def regfields(field, value):
     indices = list(reversed(range(32)))
     logging.debug(indices)
     sty = lambda i, fs: list(filter(None, [f.style if f.limits[0] >= i >= f.limits[1] else None for f in fs]))
-    styles = [sty(i, fs)[0] if sty(i, fs) else '' for i in indices]
+    styles = [sty(i, fs)[0] if sty(i, fs) else 'dim' for i in indices]
     styles.reverse()
     logging.debug(styles)
 
     ## For the table
-    table_title = f'Value: 0x{a:09_X}'
-    if has_new:
-        table_title = 'Original ' + table_title + f', New Value: 0x{b:09_X}'
+    paddings = {}
+    match squeeze:
+        case 'narrow': paddings['collapse_padding'] = True
+        case 'narrower': paddings['padding'] = 0
+        case _: pass
 
-    table = Table(title=table_title, title_style='bold white on black', box=box.HORIZONTALS)
+    table = Table(title='', box=box.SIMPLE_HEAD, show_lines=True, title_justify='left',
+                  **paddings)
     for i in indices:
         table.add_column(f'{i}', justify="right", style=styles[i], no_wrap=True)
     table.add_row(*int2ba(a, length=32).to01())
@@ -108,19 +146,37 @@ def regfields(field, value):
         for i in indices:
             for f in fs:
                 if (f.new_value != None) and (f.limits[0] >= i >= f.limits[1]):
-                    bits[i] = '[bold white on black]' + bits[i]
+                    bits[i] = '[bold reverse]' + bits[i]
         bits = [b if b.startswith('[') else '[dim]' + b for b in bits]
         logging.debug(bits)
         bits.reverse()
         table.add_row(*bits)
 
-    console = Console()
-    console.print('')
-    console.print(table)
+    ## Display
+    b_formatted = lambda a_s, b_s: ''.join([f'[bold reverse]{b_s[i]}[/bold reverse]' if a_s[i] != b_s[i] else b_s[i]
+                                               for i in range(len(b_s))])
+    val_chg_fmtted = lambda l, r, a, b: "{}{}{}".format(f'[{l}:{r}]'.ljust(7, ' ') + ' = ' if l != None and r != None else '',
+                                                        a, ' --> ' + b_formatted(a, b) if b else '')
 
-    for f in fs:
-        console.print(f'[{f.limits[0]}:{f.limits[1]}] = 0x{f.value:X}{f" --> 0x{f.new_value:X}" if f.new_value else ""}')
+    values = [val_chg_fmtted(32-1, 0, f'0x{a:09_X}', f'0x{b:09_X}' if has_new else '')]
+    values += ["{} = {}{}".format(f'[{f.limits[0]}:{f.limits[1]}]'.ljust(7, ' '),
+                                    f'0x{f.value:X}', f' --> 0x{f.new_value:X}' if f.new_value else '')
+                        for f in fs]
+    
+    group = Group(
+        Panel.fit(table, title='[bold blue]Register Bits',
+                    subtitle=val_chg_fmtted(None, None, f'0x{a:09_X}', f'0x{b:09_X}' if has_new else '')),
+        Panel.fit('\n'.join(values), title='[bold blue]Values')
+    )
 
+    console = Console(record=True)
+    console.print(group)
+    if save:
+        from pathvalidate import sanitize_filepath
+        from pathlib import Path
+        save_path = Path('reg_fileds_save')
+        save_path.mkdir(parents=True, exist_ok=True)
+        console.save_svg(sanitize_filepath(save_path / "Value_{}--Fields_{}.svg".format(value, field), replacement_text='_'))
 
 if __name__ == '__main__':
     cli()
